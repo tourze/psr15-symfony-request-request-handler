@@ -29,26 +29,26 @@ class SymfonyRequestHandler implements RequestHandlerInterface
     ) {
     }
 
-    private SfRequest $request;
+    private ?SfRequest $request = null;
 
-    public function getRequest(): SfRequest
+    public function getRequest(): ?SfRequest
     {
         return $this->request;
     }
 
-    public function setRequest(SfRequest $request): void
+    public function setRequest(?SfRequest $request): void
     {
         $this->request = $request;
     }
 
-    private SfResponse $response;
+    private ?SfResponse $response = null;
 
-    public function getResponse(): SfResponse
+    public function getResponse(): ?SfResponse
     {
         return $this->response;
     }
 
-    public function setResponse(SfResponse $response): void
+    public function setResponse(?SfResponse $response): void
     {
         $this->response = $response;
     }
