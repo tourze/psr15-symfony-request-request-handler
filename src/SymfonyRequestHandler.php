@@ -110,6 +110,7 @@ class SymfonyRequestHandler implements RequestHandlerInterface
             $sfRequest->headers->set($k, $v);
         }
 
+        $sfResponse = new SfResponse('');
         try {
             $this->setRequest($sfRequest);
             $sfResponse = $this->kernel->handle($sfRequest);
@@ -118,7 +119,7 @@ class SymfonyRequestHandler implements RequestHandlerInterface
             $this->logger?->error('执行请求时发生未被捕捉的异常', [
                 'exception' => $fe,
             ]);
-            $sfResponse = new SfResponse($fe);
+            $sfResponse->setContent($fe);
         } finally {
             $this->setResponse($sfResponse);
         }
