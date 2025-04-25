@@ -10,6 +10,7 @@ use Psr\Http\Server\RequestHandlerInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Bridge\PsrHttpMessage\HttpFoundationFactoryInterface;
 use Symfony\Bridge\PsrHttpMessage\HttpMessageFactoryInterface;
+use Symfony\Component\HttpFoundation\Request as SfRequest;
 use Symfony\Component\HttpFoundation\Response as SfResponse;
 use Symfony\Component\HttpKernel\HttpKernelInterface;
 use Symfony\Component\HttpKernel\KernelInterface;
@@ -26,6 +27,30 @@ class SymfonyRequestHandler implements RequestHandlerInterface
         private readonly HttpMessageFactoryInterface $httpMessageFactory,
         private readonly ?LoggerInterface $logger = null,
     ) {
+    }
+
+    private SfRequest $request;
+
+    public function getRequest(): SfRequest
+    {
+        return $this->request;
+    }
+
+    public function setRequest(SfRequest $request): void
+    {
+        $this->request = $request;
+    }
+
+    private SfResponse $response;
+
+    public function getResponse(): SfResponse
+    {
+        return $this->response;
+    }
+
+    public function setResponse(SfResponse $response): void
+    {
+        $this->response = $response;
     }
 
     public function handle(ServerRequestInterface $request): ResponseInterface
@@ -86,6 +111,7 @@ class SymfonyRequestHandler implements RequestHandlerInterface
         }
 
         try {
+            $this->setRequest($sfRequest);
             $sfResponse = $this->kernel->handle($sfRequest);
         } catch (\Throwable $exception) {
             $fe = ExceptionPrinter::exception($exception);
@@ -93,6 +119,8 @@ class SymfonyRequestHandler implements RequestHandlerInterface
                 'exception' => $fe,
             ]);
             $sfResponse = new SfResponse($fe);
+        } finally {
+            $this->setResponse($sfResponse);
         }
 
         // TODO 类似 http_cache 这种服务，应该需要再处理的，详细看 \Symfony\Component\HttpKernel\HttpCache\HttpCache::__construct
