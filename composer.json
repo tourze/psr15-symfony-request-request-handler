@@ -12,7 +12,7 @@
     "symfony/http-foundation": "^6.4",
     "symfony/http-kernel": "^6.4",
     "symfony/psr-http-message-bridge": "^6.4",
-    "tourze/backtrace-helper": "~0.0.5"
+    "tourze/backtrace-helper": "0.1.*"
   },
   "require-dev": {
     "phpstan/phpstan": "^2.1",
