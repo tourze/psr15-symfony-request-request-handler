@@ -66,7 +66,7 @@ class SymfonyRequestHandler implements RequestHandlerInterface
         $sfRequest = $this->httpFoundationFactory->createRequest($request);
 
         // 如果是Nginx ssl代理转发过来的话，我们需要声明一下我们是HTTPS
-        if ($request->hasHeader('Force-Https') && $request->getHeaderLine('Force-Https')) {
+        if ($request->hasHeader('Force-Https') && !empty($request->getHeaderLine('Force-Https'))) {
             $sfRequest->server->set('HTTPS', 'on');
         }
         // TODO 更多负载均衡规则
@@ -81,7 +81,7 @@ class SymfonyRequestHandler implements RequestHandlerInterface
         // 默认情况下，symfony没对header中的Authorization做处理，貌似是依赖了nginx、php-fpm他们的处理，我们需要做一次兜底处理咯
         if ($request->hasHeader('Authorization')) {
             $authorizationHeader = $request->getHeaderLine('Authorization');
-            if ($authorizationHeader) {
+            if (!empty($authorizationHeader)) {
                 // copy from vendor/symfony/http-foundation/ServerBag.php
                 if (0 === stripos($authorizationHeader, 'basic ')) {
                     // Decode AUTHORIZATION header into PHP_AUTH_USER and PHP_AUTH_PW when authorization header is basic

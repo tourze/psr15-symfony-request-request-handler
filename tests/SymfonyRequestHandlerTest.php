@@ -392,16 +392,16 @@ class TestSfRequest extends \Symfony\Component\HttpFoundation\Request
 /**
  * 测试用的 HeaderBag 替身
  */
-class TestHeaderBag
+class TestHeaderBag extends \Symfony\Component\HttpFoundation\HeaderBag
 {
-    private $headers = [];
+    protected $headers = [];
 
-    public function set($key, $value): void
+    public function set($key, $value, bool $replace = true): void
     {
         $this->headers[$key] = $value;
     }
 
-    public function get($key, $default = null)
+    public function get(string $key, ?string $default = null): ?string
     {
         return $this->headers[$key] ?? $default;
     }
@@ -410,16 +410,16 @@ class TestHeaderBag
 /**
  * 测试用的 ServerBag 替身
  */
-class TestServerBag
+class TestServerBag extends \Symfony\Component\HttpFoundation\ServerBag
 {
-    private $parameters = [];
+    protected $parameters = [];
 
-    public function set($key, $value): void
+    public function set(string $key, mixed $value): void
     {
         $this->parameters[$key] = $value;
     }
 
-    public function get($key, $default = null)
+    public function get(string $key, mixed $default = null): mixed
     {
         return $this->parameters[$key] ?? $default;
     }
