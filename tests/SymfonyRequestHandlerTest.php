@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Tourze\PSR15SymfonyRequestHandler\Tests;
 
+use Tourze\PSR15SymfonyRequestHandler\Tests\Exception\TestRequestHandlingException;
+
 use Nyholm\Psr7\Response;
 use Nyholm\Psr7\ServerRequest;
 use PHPUnit\Framework\TestCase;
@@ -266,7 +268,7 @@ class TestExceptionHttpKernel implements HttpKernelInterface
 {
     public function handle($request, $type = self::MAIN_REQUEST, $catch = true): SfResponse
     {
-        throw new \Exception('测试异常');
+        throw new TestRequestHandlingException('测试异常');
     }
 }
 
@@ -423,4 +425,6 @@ class TestServerBag extends \Symfony\Component\HttpFoundation\ServerBag
     {
         return $this->parameters[$key] ?? $default;
     }
-} 
+}
+
+ 
