@@ -21,12 +21,16 @@ use Tourze\BacktraceHelper\ExceptionPrinter;
  */
 class SymfonyRequestHandler implements RequestHandlerInterface
 {
+    private readonly LegacyVariablesInterface $legacyVariables;
+
     public function __construct(
         private readonly HttpKernelInterface|KernelInterface $kernel,
         private readonly HttpFoundationFactoryInterface $httpFoundationFactory,
         private readonly HttpMessageFactoryInterface $httpMessageFactory,
         private readonly ?LoggerInterface $logger = null,
+        ?LegacyVariablesInterface $legacyVariables = null,
     ) {
+        $this->legacyVariables = $legacyVariables ?? new GlobalVariableManager();
     }
 
     private ?SfRequest $request = null;
@@ -55,77 +59,141 @@ class SymfonyRequestHandler implements RequestHandlerInterface
 
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
-        $_GET = $request->getQueryParams();
-        $_REQUEST = [...$_GET];
+        $this->initializeGlobalVariables($request);
+
+        $sfRequest = $this->createSymfonyRequest($request);
+        $this->configureProxyHeaders($request, $sfRequest);
+        $this->configureAuthorizationHeaders($request, $sfRequest);
+
+        return $this->executeKernelRequest($sfRequest);
+    }
+
+    private function initializeGlobalVariables(ServerRequestInterface $request): void
+    {
+        // 初始化查询参数
+        $queryParams = $request->getQueryParams();
+        $this->legacyVariables->setQueryParameters($queryParams);
+
+        // 初始化请求参数（组合GET和POST）
+        $postParams = $this->legacyVariables->getPostParameters();
+        $requestParams = array_merge($queryParams, $postParams);
+        $this->legacyVariables->setRequestParameters($requestParams);
 
         // Cookie重新格式化写入
-        \parse_str(\str_replace('; ', '&', $request->getHeaderLine('cookie')), $_COOKIE);
+        $cookieHeader = $request->getHeaderLine('cookie');
+        $cookieData = $this->legacyVariables->parseCookieHeader($cookieHeader);
+        if ([] !== $cookieData) {
+            $this->legacyVariables->setCookieParameters($cookieData);
+        }
+    }
 
-        // $this->output->writeln("<comment>{$this->worker->name}-{$this->worker->id}</comment> <info>{$request->getMethod()}</info> {$request->getUri()->getPath()}");
+    private function createSymfonyRequest(ServerRequestInterface $request): SfRequest
+    {
+        return $this->httpFoundationFactory->createRequest($request);
+    }
 
-        $sfRequest = $this->httpFoundationFactory->createRequest($request);
-
+    private function configureProxyHeaders(ServerRequestInterface $request, SfRequest $sfRequest): void
+    {
         // 如果是Nginx ssl代理转发过来的话，我们需要声明一下我们是HTTPS
-        if ($request->hasHeader('Force-Https') && !empty($request->getHeaderLine('Force-Https'))) {
+        if ($request->hasHeader('Force-Https') && '' !== $request->getHeaderLine('Force-Https')) {
             $sfRequest->server->set('HTTPS', 'on');
         }
-        // TODO 更多负载均衡规则
 
         // TODO 真实IP透传，要注意这个可能会有漏洞
         if ($request->hasHeader('X-Real-IP')) {
             $sfRequest->server->set('REMOTE_ADDR', $request->getHeaderLine('X-Real-IP'));
         }
+    }
 
-        $appendHeaders = [];
-
-        // 默认情况下，symfony没对header中的Authorization做处理，貌似是依赖了nginx、php-fpm他们的处理，我们需要做一次兜底处理咯
-        if ($request->hasHeader('Authorization')) {
-            $authorizationHeader = $request->getHeaderLine('Authorization');
-            if (!empty($authorizationHeader)) {
-                // copy from vendor/symfony/http-foundation/ServerBag.php
-                if (0 === stripos($authorizationHeader, 'basic ')) {
-                    // Decode AUTHORIZATION header into PHP_AUTH_USER and PHP_AUTH_PW when authorization header is basic
-                    $exploded = explode(':', base64_decode(substr($authorizationHeader, 6)), 2);
-                    if (2 == \count($exploded)) {
-                        [$appendHeaders['PHP_AUTH_USER'], $appendHeaders['PHP_AUTH_PW']] = $exploded;
-                    }
-                } elseif (empty($this->parameters['PHP_AUTH_DIGEST']) && (0 === stripos($authorizationHeader, 'digest '))) {
-                    // In some circumstances PHP_AUTH_DIGEST needs to be set
-                    $appendHeaders['PHP_AUTH_DIGEST'] = $authorizationHeader;
-                } elseif (0 === stripos($authorizationHeader, 'bearer ')) {
-                    /*
-                     * XXX: Since there is no PHP_AUTH_BEARER in PHP predefined variables,
-                     *      I'll just set $headers['AUTHORIZATION'] here.
-                     *      https://php.net/reserved.variables.server
-                     */
-                    $appendHeaders['AUTHORIZATION'] = $authorizationHeader;
-                }
-            }
+    private function configureAuthorizationHeaders(ServerRequestInterface $request, SfRequest $sfRequest): void
+    {
+        if (!$request->hasHeader('Authorization')) {
+            return;
         }
 
-        // 在一些业务中，我们实际是需要在请求发生前，就生成一个 request id，这种情况才能更加好地打印整个日志
-        // $appendHeaders['Request-Id'] = Uuid::v4()->toRfc4122();
+        $authorizationHeader = $request->getHeaderLine('Authorization');
+        if ('' === $authorizationHeader) {
+            return;
+        }
+
+        $appendHeaders = $this->parseAuthorizationHeader($authorizationHeader, $sfRequest);
 
         foreach ($appendHeaders as $k => $v) {
             $sfRequest->headers->set($k, $v);
         }
+    }
 
+    /**
+     * @return array<string, string>
+     */
+    private function parseAuthorizationHeader(string $authorizationHeader, SfRequest $sfRequest): array
+    {
+        $appendHeaders = [];
+
+        // copy from vendor/symfony/http-foundation/ServerBag.php
+        if (0 === stripos($authorizationHeader, 'basic ')) {
+            $appendHeaders = $this->parseBasicAuthorizationHeader($authorizationHeader);
+        } elseif (null === $sfRequest->server->get('PHP_AUTH_DIGEST') && (0 === stripos($authorizationHeader, 'digest '))) {
+            // In some circumstances PHP_AUTH_DIGEST needs to be set
+            $appendHeaders['PHP_AUTH_DIGEST'] = $authorizationHeader;
+        } elseif (0 === stripos($authorizationHeader, 'bearer ')) {
+            /*
+             * XXX: Since there is no PHP_AUTH_BEARER in PHP predefined variables,
+             *      I'll just set $headers['AUTHORIZATION'] here.
+             *      https://php.net/reserved.variables.server
+             */
+            $appendHeaders['AUTHORIZATION'] = $authorizationHeader;
+        }
+
+        return $appendHeaders;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function parseBasicAuthorizationHeader(string $authorizationHeader): array
+    {
+        // Decode AUTHORIZATION header into PHP_AUTH_USER and PHP_AUTH_PW when authorization header is basic
+        $decoded = base64_decode(substr($authorizationHeader, 6), true);
+        if (false === $decoded) {
+            return [];
+        }
+        $exploded = explode(':', $decoded, 2);
+        if (2 === \count($exploded)) {
+            return [
+                'PHP_AUTH_USER' => $exploded[0],
+                'PHP_AUTH_PW' => $exploded[1],
+            ];
+        }
+
+        return [];
+    }
+
+    private function executeKernelRequest(SfRequest $sfRequest): ResponseInterface
+    {
         $sfResponse = new SfResponse('');
         try {
             $this->setRequest($sfRequest);
             $sfResponse = $this->kernel->handle($sfRequest);
         } catch (\Throwable $exception) {
-            $fe = ExceptionPrinter::exception($exception);
-            $this->logger?->error('执行请求时发生未被捕捉的异常', [
-                'exception' => $fe,
-            ]);
-            $sfResponse->setContent($fe);
+            $sfResponse = $this->handleException($exception);
         } finally {
             $this->setResponse($sfResponse);
         }
 
-        // TODO 类似 http_cache 这种服务，应该需要再处理的，详细看 \Symfony\Component\HttpKernel\HttpCache\HttpCache::__construct
-
         return $this->httpMessageFactory->createResponse($sfResponse);
+    }
+
+    private function handleException(\Throwable $exception): SfResponse
+    {
+        $fe = ExceptionPrinter::exception($exception);
+        $this->logger?->error('执行请求时发生未被捕捉的异常', [
+            'exception' => $fe,
+        ]);
+
+        $response = new SfResponse('');
+        $response->setContent($fe);
+
+        return $response;
     }
 }
